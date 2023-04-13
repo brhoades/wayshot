@@ -4,7 +4,6 @@ use std::{
     fs::File,
     io::{stdout, BufWriter},
     os::unix::prelude::FromRawFd,
-    os::unix::prelude::RawFd,
     process::exit,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -12,16 +11,14 @@ use std::{
 use crate::backend::{create_shm_fd, FrameFormat, FrameState};
 use crate::convert::create_converter;
 
-use image::{
-    imageops::resize, ColorType, GenericImage, ImageBuffer, ImageEncoder,
-};
 pub use image::RgbaImage;
+use image::{imageops::resize, GenericImage, ImageBuffer};
 use memmap2::MmapMut;
 use nix::unistd;
 use wayland_client::{
     protocol::{
-        wl_buffer, wl_buffer::WlBuffer, wl_output, wl_registry, wl_shm, wl_shm::Format,
-        wl_shm_pool, wl_shm_pool::WlShmPool,
+        wl_buffer, wl_buffer::WlBuffer, wl_output, wl_registry, wl_shm, wl_shm_pool,
+        wl_shm_pool::WlShmPool,
     },
     Connection, Dispatch, QueueHandle, WEnum,
 };
@@ -157,7 +154,7 @@ impl Dispatch<wl_output::WlOutput, ()> for WayshotState {
         event: wl_output::Event,
         _: &(),
         _: &Connection,
-        qh: &QueueHandle<Self>,
+        _: &QueueHandle<Self>,
     ) {
         for output in state.outputs.iter_mut() {
             if output.wl_output != *wl_output {
@@ -187,8 +184,8 @@ impl Dispatch<ZxdgOutputV1, ()> for WayshotState {
             let xdgo = if let Some(xdgo) = &output.xdg_output {
                 xdgo
             } else {
-				continue;
-			};
+                continue;
+            };
             if xdgo != xdg_output {
                 continue;
             }
@@ -265,8 +262,8 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for WayshotState {
             let f = if let Some(f) = &output.frame {
                 f
             } else {
-				continue;
-			};
+                continue;
+            };
             if f != frame {
                 continue;
             }
@@ -338,7 +335,6 @@ impl Dispatch<WlShmPool, ()> for WayshotState {
     ) {
     }
 }
-
 
 #[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
 pub struct Region {
@@ -415,7 +411,7 @@ pub fn get_frame(args: FrameArgs) -> Result<RgbaImage, Box<dyn Error>> {
     }
 
     let region = if let Some(r) = args.region {
-        backend::CaptureRegion{
+        backend::CaptureRegion {
             x_coordinate: r.x,
             y_coordinate: r.y,
             width: r.width,
@@ -561,14 +557,11 @@ pub fn get_frame(args: FrameArgs) -> Result<RgbaImage, Box<dyn Error>> {
                 let mem_fd = output.mem_fd.unwrap();
 
                 let frame_format = output.frame_format.unwrap();
-                let frame_bytes = frame_format.stride * frame_format.height;
 
                 let mem_file = unsafe { File::from_raw_fd(mem_fd) };
                 let mut frame_mmap = unsafe { MmapMut::map_mut(&mem_file)? };
                 let data = &mut *frame_mmap;
-                let frame_color_type = if let Some(converter) =
-                    create_converter(frame_format.format)
-                {
+                if let Some(converter) = create_converter(frame_format.format) {
                     converter.convert_inplace(data)
                 } else {
                     log::error!("Unsupported buffer format: {:?}", frame_format.format);
@@ -613,6 +606,7 @@ pub fn get_frame(args: FrameArgs) -> Result<RgbaImage, Box<dyn Error>> {
     Ok(dest)
 }
 
+#[allow(dead_code)]
 fn main() -> Result<(), Box<dyn Error>> {
     let args = clap::set_flags().get_matches();
     env::set_var("RUST_LOG", "wayshot=info");
@@ -846,14 +840,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let mem_fd = output.mem_fd.unwrap();
 
                 let frame_format = output.frame_format.unwrap();
-                let frame_bytes = frame_format.stride * frame_format.height;
 
                 let mem_file = unsafe { File::from_raw_fd(mem_fd) };
                 let mut frame_mmap = unsafe { MmapMut::map_mut(&mem_file)? };
                 let data = &mut *frame_mmap;
-                let frame_color_type = if let Some(converter) =
-                    create_converter(frame_format.format)
-                {
+                if let Some(converter) = create_converter(frame_format.format) {
                     converter.convert_inplace(data)
                 } else {
                     log::error!("Unsupported buffer format: {:?}", frame_format.format);

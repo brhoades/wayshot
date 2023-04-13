@@ -1,20 +1,10 @@
-use std::{cell::RefCell, fs::File, os::unix::prelude::RawFd, process::exit, rc::Rc};
-use wayland_client::{protocol::wl_output, protocol::wl_output::WlOutput};
-//, Display, GlobalManager};
-// use wayland_protocols::unstable::xdg_output::v1::client::{
-//     zxdg_output_manager_v1::ZxdgOutputManagerV1, zxdg_output_v1,
-// };
-use crate::backend::{FrameCopy, FrameFormat, FrameState};
+use crate::backend::{FrameFormat, FrameState};
+use std::os::unix::prelude::RawFd;
+use wayland_client::protocol::wl_output::WlOutput;
 
-use wayland_protocols::xdg::xdg_output::zv1::client::{
-    zxdg_output_manager_v1, zxdg_output_manager_v1::ZxdgOutputManagerV1, zxdg_output_v1,
-    zxdg_output_v1::ZxdgOutputV1,
-};
+use wayland_protocols::xdg::xdg_output::zv1::client::zxdg_output_v1::ZxdgOutputV1;
 
-use wayland_protocols_wlr::screencopy::v1::client::{
-    zwlr_screencopy_frame_v1, zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
-    zwlr_screencopy_manager_v1, zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
-};
+use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1;
 
 #[derive(Debug, Clone)]
 pub struct OutputInfo {

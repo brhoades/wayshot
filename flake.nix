@@ -18,6 +18,7 @@
           dbus.dev
           xorg.libxcb
           xorg.libXrandr
+          rustfmt
         ];
       };
     }));

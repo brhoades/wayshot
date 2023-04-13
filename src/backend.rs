@@ -1,14 +1,8 @@
 use std::{
-    cell::RefCell,
     error::Error,
     ffi::CStr,
-    fs::File,
     io::Write,
-    os::unix::prelude::FromRawFd,
     os::unix::prelude::RawFd,
-    process::exit,
-    rc::Rc,
-    sync::atomic::{AtomicBool, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -28,13 +22,7 @@ use image::{
 };
 use memmap2::MmapMut;
 
-use wayland_client::protocol::{wl_output::WlOutput, wl_shm, wl_shm::Format};
-/*use wayland_protocols::wlr::unstable::screencopy::v1::client::{
-    zwlr_screencopy_frame_v1, zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
-    zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
-};*/
-
-use crate::convert::create_converter;
+use wayland_client::protocol::wl_shm::Format;
 
 /// Type of frame supported by the compositor. For now we only support Argb8888, Xrgb8888, and
 /// Xbgr8888.
