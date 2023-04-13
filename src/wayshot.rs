@@ -12,6 +12,7 @@ use crate::backend::{create_shm_fd, FrameFormat, FrameState};
 use crate::convert::create_converter;
 
 pub use image::RgbaImage;
+pub use backend::{write_to_file, EncodingFormat};
 use image::{imageops::resize, GenericImage, ImageBuffer};
 use memmap2::MmapMut;
 use nix::unistd;
