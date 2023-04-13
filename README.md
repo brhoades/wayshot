@@ -1,3 +1,10 @@
+# NOTES ABOUT FORK
+This fork pulls in a multi-monitor patch from:
+
+https://github.com/mstoeckl/wayshot
+
+Which isn't yet upstream. It also adds a nix flake and exposes several pieces as a library crate.
+
 <p align=center>
   <img src="https://git.sr.ht/~shinyzenith/wayshot/blob/main/docs/assets/wayshot.png" alt=wayshot width=60%>
   <p align=center>A native, blazing-fast 🚀🚀🚀 screenshot tool for wlroots based compositors such as sway and river written in Rust.</p>
