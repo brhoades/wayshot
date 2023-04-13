@@ -13,8 +13,9 @@ use crate::backend::{create_shm_fd, FrameFormat, FrameState};
 use crate::convert::create_converter;
 
 use image::{
-    imageops::resize, ColorType, GenericImage, ImageBuffer, ImageEncoder, RgbImage, RgbaImage,
+    imageops::resize, ColorType, GenericImage, ImageBuffer, ImageEncoder,
 };
+pub use image::RgbaImage;
 use memmap2::MmapMut;
 use nix::unistd;
 use wayland_client::{
@@ -77,7 +78,7 @@ fn parse_geometry(g: &str) -> Option<backend::CaptureRegion> {
     })
 }
 
-struct WayshotState {
+pub struct WayshotState {
     formats: Vec<wl_shm::Format>,
     outputs: Vec<output::OutputInfo>,
     shm: Option<wl_shm::WlShm>,
@@ -336,6 +337,280 @@ impl Dispatch<WlShmPool, ()> for WayshotState {
         _: &QueueHandle<Self>,
     ) {
     }
+}
+
+
+#[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
+pub struct Region {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+#[derive(Debug, Default)]
+pub struct FrameArgs {
+    pub cursor: bool,
+    pub output: Option<String>,
+    pub listoutputs: bool,
+    pub region: Option<Region>,
+}
+
+pub fn get_frame(args: FrameArgs) -> Result<RgbaImage, Box<dyn Error>> {
+    env::set_var("RUST_LOG", "wayshot=info");
+    env_logger::init();
+    log::trace!("Logger initialized.");
+
+    let cursor_overlay: i32 = if args.cursor { 1 } else { 0 };
+
+    let mut state = WayshotState {
+        outputs: Vec::new(),
+        shm: None,
+        screencopy: None,
+        xdg_output: None,
+        formats: Vec::new(),
+    };
+    let conn = wayland_client::Connection::connect_to_env().unwrap();
+    let display = conn.display();
+
+    let mut event_queue = conn.new_event_queue();
+    let qh: QueueHandle<WayshotState> = event_queue.handle();
+    // todo: use the registry abstraction from wayland-client
+    let _registry = display.get_registry(&qh, ());
+
+    // First roundtrip: bind all globals and outputs
+    event_queue.roundtrip(&mut state).unwrap();
+    if state.shm.is_none() {
+        log::error!("Compositor is missing wl_shm interface");
+        exit(1);
+    }
+    if state.shm.is_none() {
+        log::error!("Compositor is missing wl_shm interface");
+        exit(1);
+    }
+
+    // Second roundtrip: learn output names and geometry
+    event_queue.roundtrip(&mut state).unwrap();
+
+    if args.listoutputs {
+        for output in state.outputs {
+            if output.wl_ready {
+                log::info!("{:#?}", output.name);
+            } else {
+                log::error!("An output did not report its name");
+            }
+        }
+        exit(1);
+    }
+
+    // If an output is chosen, select only it
+    if let Some(chosen_output) = args.output {
+        // Remove all outputs which do not match
+        state.outputs = state
+            .outputs
+            .into_iter()
+            .filter(|output| output.wl_ready && output.name == chosen_output)
+            .collect();
+        // todo: impl drop?
+    }
+
+    let region = if let Some(r) = args.region {
+        backend::CaptureRegion{
+            x_coordinate: r.x,
+            y_coordinate: r.y,
+            width: r.width,
+            height: r.height,
+        }
+    } else {
+        backend::CaptureRegion {
+            // with signed integers, x_1,x_2,y_1,y_2 is better structure
+            x_coordinate: i32::MIN / 2,
+            y_coordinate: i32::MIN / 2,
+            width: i32::MAX,
+            height: i32::MAX,
+        }
+    };
+
+    // Remove all outputs which do not overlap the target region
+    state.outputs = state
+        .outputs
+        .into_iter()
+        .filter(|output| {
+            let x1: i32 = cmp::max(output.dimensions.x, region.x_coordinate);
+            let y1: i32 = cmp::max(output.dimensions.y, region.y_coordinate);
+            let x2: i32 = cmp::min(
+                output.dimensions.x + output.dimensions.width,
+                region.x_coordinate + region.width,
+            );
+            let y2: i32 = cmp::min(
+                output.dimensions.y + output.dimensions.height,
+                region.y_coordinate + region.height,
+            );
+
+            let width = x2 - x1;
+            let height = y2 - y1;
+            width > 0 && height > 0
+        })
+        .collect();
+
+    if state.outputs.is_empty() {
+        log::error!("Provided capture region doesn't intersect with any outputs!");
+        exit(1);
+    }
+
+    let mut net_x1: i32 = i32::MAX;
+    let mut net_x2: i32 = i32::MIN;
+    let mut net_y1: i32 = i32::MAX;
+    let mut net_y2: i32 = i32::MIN;
+    for output in state.outputs.iter_mut() {
+        let manager = state.screencopy.as_mut().unwrap();
+
+        let x1: i32 = cmp::max(output.dimensions.x, region.x_coordinate);
+        let y1: i32 = cmp::max(output.dimensions.y, region.y_coordinate);
+        let x2: i32 = cmp::min(
+            output.dimensions.x + output.dimensions.width,
+            region.x_coordinate + region.width,
+        );
+        let y2: i32 = cmp::min(
+            output.dimensions.y + output.dimensions.height,
+            region.y_coordinate + region.height,
+        );
+
+        net_x1 = cmp::min(net_x1, x1);
+        net_x2 = cmp::max(net_x2, x2);
+        net_y1 = cmp::min(net_y1, y1);
+        net_y2 = cmp::max(net_y2, y2);
+
+        // Quoting spec: "The region is given in output logical coordinates"
+        // So subtract output position from global logical coordinates
+        let frame = manager.capture_output_region(
+            cursor_overlay,
+            &output.wl_output,
+            x1 - output.dimensions.x,
+            y1 - output.dimensions.y,
+            x2 - x1,
+            y2 - y1,
+            &qh,
+            (),
+        );
+        output.frame = Some(frame);
+    }
+
+    // Third roundtrip: learn frame parameters for requests
+    event_queue.roundtrip(&mut state).unwrap();
+
+    for output in state.outputs.iter_mut() {
+        let shm = state.shm.as_mut().unwrap();
+
+        let frame_format = if let Some(frame_format) = output.frame_format {
+            frame_format
+        } else {
+            log::error!("Output did not specify a frame format");
+            exit(1);
+        };
+
+        let frame_bytes = frame_format.stride * frame_format.height;
+
+        // Create an in memory file and return it's file descriptor.
+        let mem_fd = create_shm_fd()?;
+        unistd::ftruncate(mem_fd, frame_bytes as i64).unwrap();
+        output.mem_fd = Some(mem_fd);
+
+        let shm_pool = shm.create_pool(mem_fd, frame_bytes as i32, &qh, ());
+        let buffer = shm_pool.create_buffer(
+            0,
+            frame_format.width as i32,
+            frame_format.height as i32,
+            frame_format.stride as i32,
+            frame_format.format,
+            &qh,
+            (),
+        );
+
+        // Copy the pixel data advertised by the compositor into the buffer we just created.
+        output.frame.as_mut().unwrap().copy(&buffer);
+    }
+
+    // Fourth roundtrip: learn whether captures succeeded or failed.
+    loop {
+        // todo: how to dispatch?
+        event_queue.roundtrip(&mut state).unwrap();
+        if !state
+            .outputs
+            .iter()
+            .any(|output| output.frame_state.is_none())
+        {
+            break;
+        }
+    }
+
+    // TODO: render at 2x or higher scale later? Default should probably be >2x
+    // max fractional scale, or something close to a rational multiple of all outputs
+    let dest_width = (net_x2 - net_x1) as u32;
+    let dest_height = (net_y2 - net_y1) as u32;
+    let mut dest: RgbaImage = ImageBuffer::new(dest_width, dest_height);
+
+    for output in state.outputs.iter_mut() {
+        match output.frame_state {
+            None => unreachable!(),
+            Some(FrameState::Failed) => {
+                log::error!("Frame copy failed");
+                exit(1);
+            }
+            Some(FrameState::Finished) => {
+                let mem_fd = output.mem_fd.unwrap();
+
+                let frame_format = output.frame_format.unwrap();
+                let frame_bytes = frame_format.stride * frame_format.height;
+
+                let mem_file = unsafe { File::from_raw_fd(mem_fd) };
+                let mut frame_mmap = unsafe { MmapMut::map_mut(&mem_file)? };
+                let data = &mut *frame_mmap;
+                let frame_color_type = if let Some(converter) =
+                    create_converter(frame_format.format)
+                {
+                    converter.convert_inplace(data)
+                } else {
+                    log::error!("Unsupported buffer format: {:?}", frame_format.format);
+                    log::error!("You can send a feature request for the above format to the mailing list for wayshot over at https://sr.ht/~shinyzenith/wayshot.");
+                    exit(1);
+                };
+                let frame_image = RgbaImage::from_raw(
+                    frame_format.width,
+                    frame_format.height,
+                    (&*frame_mmap).to_vec(),
+                )
+                .unwrap();
+
+                let x1: i32 = cmp::max(output.dimensions.x, region.x_coordinate);
+                let y1: i32 = cmp::max(output.dimensions.y, region.y_coordinate);
+                let x2: i32 = cmp::min(
+                    output.dimensions.x + output.dimensions.width,
+                    region.x_coordinate + region.width,
+                );
+                let y2: i32 = cmp::min(
+                    output.dimensions.y + output.dimensions.height,
+                    region.y_coordinate + region.height,
+                );
+
+                let resized: RgbaImage = resize(
+                    &frame_image,
+                    (x2 - x1) as u32,
+                    (y2 - y1) as u32,
+                    image::imageops::FilterType::Triangle,
+                );
+                if let Err(e) = dest.copy_from(&resized, (x1 - net_x1) as u32, (y1 - net_y1) as u32)
+                {
+                    log::error!("Failed to copy output image onto dest image: {:?}", e);
+                    exit(1);
+                }
+
+                // todo: cleanup?
+            }
+        }
+    }
+
+    Ok(dest)
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
