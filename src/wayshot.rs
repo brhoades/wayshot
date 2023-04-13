@@ -183,7 +183,9 @@ impl Dispatch<ZxdgOutputV1, ()> for WayshotState {
         _: &QueueHandle<Self>,
     ) {
         for output in state.outputs.iter_mut() {
-            let Some(xdgo) = &output.xdg_output else {
+            let xdgo = if let Some(xdgo) = &output.xdg_output {
+                xdgo
+            } else {
 				continue;
 			};
             if xdgo != xdg_output {
@@ -259,7 +261,9 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for WayshotState {
         _: &QueueHandle<Self>,
     ) {
         for output in state.outputs.iter_mut() {
-            let Some(f) = &output.frame else {
+            let f = if let Some(f) = &output.frame {
+                f
+            } else {
 				continue;
 			};
             if f != frame {
@@ -487,7 +491,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     for output in state.outputs.iter_mut() {
         let shm = state.shm.as_mut().unwrap();
 
-        let Some(frame_format) = output.frame_format else {
+        let frame_format = if let Some(frame_format) = output.frame_format {
+            frame_format
+        } else {
             log::error!("Output did not specify a frame format");
             exit(1);
         };
